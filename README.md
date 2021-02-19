@@ -3,7 +3,9 @@
 A high level struct module for python that makes the default struct module human readable.  
 The main use case I've found for this is pulling data out of binary files and raw tcp streams that are sending structs from the native language.
 
-The basic idea is to create an OrderedDict for each struct.  You can nest them as desired.  This allows a fairly readable way to define structures.
+The basic idea is to create an OrderedDict for each struct.  You can nest them as desired.  This allows a fairly readable way to define structures and boils them downs to dictionaries so they are asy to use.
+
+This also works in both directions.  A defined struct can unpack data from bytes into a dict and pack data from a dict into binary.  The dicts you create the structure with need to be OrderedDicts so the elements are maintained in the correct order, but you can use regular dicts for supplying the data to pack after that since it already has the order.
 
 Example
 ```
