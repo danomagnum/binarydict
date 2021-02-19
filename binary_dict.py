@@ -1,51 +1,28 @@
 import struct
 from collections import OrderedDict
 
-# Provide easier to use definitions of the constants the struct module uses.
-# See https://docs.python.org/3/library/struct.html
-CHAR = 'c'
-SINT8 = 'b'
-UINT8 = 'B'
-BOOL = '?'
-SINT16 = 'h'
-UINT16 = 'H'
-SINT32 = 'l'
-UINT32 = 'L'
-SINT64 = 'q'
-UINT64 = 'Q'
-SINT_NATIVE = 'n'
-UINT_NATIVE = 'N'
-HALF = 'e'
-FLOAT = 'f'
-DOUBLE = 'd'
-
-
-def STRING(count):
-    '''
-    Per the struct module you can prepend a type with a count to have repeats.  It really only applies to what
-    we are doing here when we have a string or padding bytes.  So the STRING and SPARE "types" take a length argument.
-    I see no reason to complicate this by making it a StructObject
-    :param count: how long the string is in bytes
-    :return: the equivalent struct module string
-    '''
-    return '{}s'.format(count)
-
 
 class StructObject(object):
     '''
     Complex data such as arrays and nested structs need to have a little wits about them.  This object is the
     template for classes that provide those wits.
     '''
-    def get_format(self):
+    def __init__(self):
         '''
-        :return: This should return the struct module string that allows the data for this object to be pulled
-        out of a byte stream
+        Needs to define the format and instantiate the struct
         '''
-        return ''
+        self.format = ''
+        self.struct = struct.Struct(self.format)
+
+    def set_endianness(self, endianness):
+        self.struct = struct.Struct(self.endianness + self.format)
+
+    def __len__(self):
+        return self.struct.size
 
     def parse_unpacked(self, unpacked_data):
         '''
-        hopefully I cna make this unpack generic enough to use for other things than arrays at some point
+        hopefully I can make this unpack generic enough to use for other things than arrays at some point
         :param unpacked_data: a python list of the unpacked elements
         :return: (value, number of items used from list)
         '''
@@ -59,6 +36,109 @@ class StructObject(object):
         '''
         return []
 
+    def pack(self, value):
+        """
+        Takes a dictionary (dict_input)
+        and a OrderedDict as described at the top of the file
+        and an opitonal offset and then return a regular (non-Ordered) dictionary
+        with the data assigned to the keys.
+        """
+        data_list = self.create_packlist(value)
+        return self.struct.pack(*data_list)
+
+    def unpack(self, data_array, offset=0):
+        """
+        Take raw response data which should be an iterable byte structure,
+        and then return an ordered dictionary with the data assigned to the keys.
+        """
+        unpacked = self.struct.unpack_from(data_array, offset)
+
+        return self.parse_unpacked(unpacked)[0]
+
+
+class BasicType(StructObject):
+    def __init__(self, format_str):
+        self.format = format_str
+        self.struct = struct.Struct(self.format)
+
+    def parse_unpacked(self, unpacked_data):
+        '''
+        hopefully I can make this unpack generic enough to use for other things than arrays at some point
+        :param unpacked_data: a python list of the unpacked elements
+        :return: (value, number of items used from list)
+        '''
+
+        return unpacked_data[0], 1
+
+    def create_packlist(self, value):
+        '''
+        :return: Returns a list that gets combined onto the end of the current list to be packed.
+         It should match the format returned by get_format
+        '''
+        return [value]
+
+
+
+# Provide easier to use definitions of the constants the struct module uses.
+# See https://docs.python.org/3/library/struct.html
+CHAR = BasicType('c')
+SINT8 = BasicType('b')
+UINT8 = BasicType('B')
+BOOL = BasicType('?')
+SINT16 = BasicType('h')
+UINT16 = BasicType('H')
+SINT32 = BasicType('l')
+UINT32 = BasicType('L')
+SINT64 = BasicType('q')
+UINT64 = BasicType('Q')
+SINT_NATIVE = BasicType('n')
+UINT_NATIVE = BasicType('N')
+HALF = BasicType('e')
+FLOAT = BasicType('f')
+DOUBLE = BasicType('d')
+
+class STRING(StructObject):
+    def __init__(self, length, null_term=True, encoding=None):
+        '''
+        Structure object for creating arrays.  These map to python lists
+        :param data_type: one of the ALLCAPS data types at the top of the file
+        :param length: how many elements the array contains
+        '''
+        self.length = length
+        self.encoding = encoding
+        self.null_term = null_term
+        self.format = f'{length}s'
+        self.struct = struct.Struct(self.format)
+
+    def parse_unpacked(self, unpacked_data):
+        '''
+        hopefully I can make this unpack generic enough to use for other things than arrays at some point
+        :param unpacked_data: a python list of the unpacked elements
+        :return: (value, number of items used from list)
+        '''
+
+        if self.encoding is None:
+            str_data = unpacked_data[0].decode()
+        else:
+            str_data = unpacked_data[0].decode(encoding=self.encoding)
+
+        if self.null_term:
+                str_data = str_data[:str_data.find('\x00')]
+
+        return str_data, 1
+
+    def create_packlist(self, value):
+        '''
+        :return: Returns a list that gets combined onto the end of the current list to be packed.
+         It should match the format returned by get_format
+        '''
+        if self.encoding is not None:
+            return [value.encode(encoding=self.encoding)]
+        else:
+            return [value.encode()]
+
+
+
 class SPARE(StructObject):
     '''
     This StructObject provides a way to add "padding" bytes to your structure.
@@ -69,10 +149,8 @@ class SPARE(StructObject):
         :param length: how many bytes of padding to use
         '''
         self.length = length
-
-    def get_format(self):
-        'format for spare bytes is an x.  preceding it with the number here to ignore the right amount'
-        return '{}x'.format(self.length)
+        self.format = f'{self.length}x'
+        self.struct = struct.Struct(self.format)
 
     def parse_unpacked(self, unpacked_data):
         '''
@@ -102,18 +180,8 @@ class ARRAY(StructObject):
         '''
         self.data_type = data_type
         self.length = length
-
-    def get_format(self):
-        '''
-        :return:
-        The format here is just "<# of elements><element type>"
-        '''
-        #TODO: support complex nested data types here
-        if isinstance((self.data_type), StructObject):
-            format_str = self.data_type.get_format() * self.length
-            return format_str
-        else:
-            return f'{self.length}{self.data_type}'
+        self.format = self.data_type.format * self.length
+        self.struct = struct.Struct(self.format)
 
     def parse_unpacked(self, unpacked_data):
         '''
@@ -123,18 +191,13 @@ class ARRAY(StructObject):
         :return: value, number of items used from list
         '''
 
-        if isinstance((self.data_type), StructObject):
-            item_count = 0
-            value_list = []
-            for i in range(self.length):
-                new_value, new_count = self.data_type.parse_unpacked(unpacked_data[item_count:])
-                item_count += new_count
-                value_list.append(new_value)
-            return value_list, item_count
-
-        else:
-            value_list = unpacked_data[:self.length]
-            return list(value_list), self.length
+        item_count = 0
+        value_list = []
+        for i in range(self.length):
+            new_value, new_count = self.data_type.parse_unpacked(unpacked_data[item_count:])
+            item_count += new_count
+            value_list.append(new_value)
+        return value_list, item_count
 
     def create_packlist(self, value):
         '''
@@ -143,21 +206,17 @@ class ARRAY(StructObject):
          It should match the format returned by get_format
          In this case value should be a listlike object
         '''
-        if isinstance((self.data_type), StructObject):
-            packlist = []
-            for i in range(self.length):
-                new_list = self.data_type.create_packlist(value[i])
-                packlist += new_list
-            return packlist
-        else:
-            return list(value)
-
+        packlist = []
+        for i in range(self.length):
+            new_list = self.data_type.create_packlist(value[i])
+            packlist += new_list
+        return packlist
 
 class BinaryStructure(StructObject):
     '''
     This is the core binary struct class that will need used.
     '''
-    def __init__(self, structure_dict, endianness):
+    def __init__(self, structure_dict):
         '''
         Initialize this class with a structure ordereddict (see example in the tests) to get an object
         you can use to convert back and forth from binary data and dicts
@@ -165,39 +224,20 @@ class BinaryStructure(StructObject):
         :param endianness: one of the struct module's endian strings
         '''
         self.structure_dict = structure_dict
-        self.endianness = endianness
-        self.has_format = False
-        self.format = self.get_format()
-        self.has_format = True
-        self.struct = struct.Struct(self.endianness + self.format)
-        self.keys = list(self.structure_dict.keys())
 
-    def get_format(self):
-        parse_string = ''
+
+        self.format = ''
 
         for k, v in self.structure_dict.items():
             if isinstance(v, OrderedDict):
-                # create a new binary structure without an endianness
-                new_binarystructure = BinaryStructure(v, '')
+                new_binarystructure = BinaryStructure(v)
                 self.structure_dict[k] = new_binarystructure
                 v = new_binarystructure
 
-            if isinstance(v, StructObject):
-                parse_string += v.get_format()
-            else:
-                parse_string += v
+            self.format += v.format
 
-        return parse_string
+        self.struct = struct.Struct(self.format)
 
-    def pack(self, data_dict):
-        """
-        Takes a dictionary (dict_input)
-        and a OrderedDict as described at the top of the file
-        and an opitonal offset and then return a regular (non-Ordered) dictionary
-        with the data assigned to the keys.
-        """
-        data_list = self.create_packlist(data_dict)
-        return self.struct.pack(*data_list)
 
     def create_packlist(self, value):
         '''
@@ -206,52 +246,71 @@ class BinaryStructure(StructObject):
         :return:
         '''
         data_list = []
+        keys = list(self.structure_dict.keys())
 
-        for k in self.keys:
+        for k in keys:
             struct_type = self.structure_dict[k]
             val = value.get(k) # will return None if the key is missing
-            if isinstance(struct_type, StructObject):
-                data_list += struct_type.create_packlist(val)
-            else:
-                data_list.append(val)
+            data_list += struct_type.create_packlist(val)
 
         return data_list
-
-
-    def unpack(self, data_array, offset=0):
-        """
-        Take raw response data which should be an iterable byte structure,
-        and then return an ordered dictionary with the data assigned to the keys.
-        """
-        unpacked = self.struct.unpack_from(data_array, offset)
-
-        return self.parse_unpacked(unpacked)[0]
 
     def parse_unpacked(self, unpacked_data):
         #final_dict = OrderedDict()
         final_dict = {}
 
+        keys = list(self.structure_dict.keys())
+
         unpack_offset = 0
-        for x in range(len(self.keys)):
-            key = self.keys[x]
+        for x in range(len(keys)):
+            key = keys[x]
             format_type = self.structure_dict[key]
-            if isinstance(format_type, StructObject):
-                final_dict[key], new_offset = format_type.parse_unpacked(unpacked_data[x + unpack_offset:])
-                unpack_offset += new_offset - 1
-            else:
-                final_dict[key] = unpacked_data[x + unpack_offset]
+            final_dict[key], new_offset = format_type.parse_unpacked(unpacked_data[x + unpack_offset:])
+            unpack_offset += new_offset - 1
 
-        return final_dict, len(self.keys) + unpack_offset
+        return final_dict, len(keys) + unpack_offset
 
-
-    def __len__(self):
-        return self.struct.size
 
 
 
 def run_tests():
+    test4()
+    test3()
     test2()
     test1()
+
+def test4():
+    original_input = b'\xAB'
+    result = UINT8.unpack(original_input)
+    assert(result == 0xAB)
+    print('Passed Simple Data Unpack')
+
+    result2 = UINT8.pack(171)
+    assert(result2 == original_input)
+    print('Passed Simple Data Pack')
+
+def test3():
+    original_input = b'\xFFThisIsAStringOfLength25\x00\x00\xEE'
+    test_dict = OrderedDict()
+    test_dict['starting_FF'] = UINT8
+    test_dict['str'] = STRING(25)
+    test_dict['ending_EE'] = UINT8
+    test_structure = BinaryStructure(test_dict)
+
+    result = test_structure.unpack(original_input)
+
+    expected_dict = {'starting_FF': 0xFF,
+                     'str': 'ThisIsAStringOfLength25',
+                     'ending_EE': 0xEE}
+
+    assert(result == expected_dict)
+    print('Passed Null Terminated String Unpacking')
+
+
+    result2 = test_structure.pack(expected_dict)
+
+    assert(result2 == original_input)
+    print('Passed Null Terminated String Packing')
 
 def test2():
     original_input = b'\xFF' + b'\x01\x02\x03\x04\x00\x05\x06\x07\x08\x09' * 2 + b'\xEE'
@@ -265,14 +324,14 @@ def test2():
     test_dict['nested']['five'] = UINT8
     test_dict['six'] = UINT8
     test_dict['array'] = ARRAY(UINT8, 3)
-    test_structure = BinaryStructure(test_dict, '<')
+    test_structure = BinaryStructure(test_dict)
 
     test_dict2 = OrderedDict()
     test_dict2['starting_FF'] = UINT8
     test_dict2['two_substructs'] = ARRAY(test_structure, 2)
     test_dict2['ending_EE'] = UINT8
 
-    test_structure2 = BinaryStructure(test_dict2, '<')
+    test_structure2 = BinaryStructure(test_dict2)
     result = test_structure2.unpack(original_input)
 
     expected_subdict = {'one': 1,
@@ -323,7 +382,7 @@ def test1():
     test_dict['nested']['five'] = UINT8
     test_dict['six'] = UINT8
     test_dict['array'] = ARRAY(UINT8, 3)
-    test_structure = BinaryStructure(test_dict, '<')
+    test_structure = BinaryStructure(test_dict)
 
     #unpack the data and we'll compare it against what we should have gotten
     result = test_structure.unpack(original_input)
