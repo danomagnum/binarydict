@@ -87,5 +87,6 @@ If you need to convert a single value, it's easy to use also.
 ```
 value = UINT16.unpack(b'\x01\x46') # value = 17,921
 value = FLOAT.pack(3.141592) # value = 0xD80F4940
+value = ARRAY(FLOAT, 4).pack([1.2, 3.4, 5.6, 7.8]) # value = 9a 99 99 3f 9a 99 59 40 33 33 b3 40 9A 99 F9 40
 
 ```
