@@ -81,3 +81,11 @@ result = test_structure2.unpack(original_input)
 
 
 ```
+
+If you need to convert a single value, it's easy to use also.
+
+```
+value = UINT16.unpack(b'\x01\x46') # value = 17,921
+value = FLOAT.pack(3.141592) # value = 0xD80F4940
+
+```
