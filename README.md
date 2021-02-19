@@ -82,7 +82,7 @@ result = test_structure2.unpack(original_input)
 
 ```
 
-If you need to convert a single value, it's easy to use also.
+If you need to convert a simple value, it's easy to use also.
 
 ```
 value = UINT16.unpack(b'\x01\x46') # value = 17,921
