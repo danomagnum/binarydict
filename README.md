@@ -53,6 +53,11 @@ test_dict2['ending_EE'] = UINT8
 
 test_structure2 = BinaryStructure(test_dict2)
 
+#for the example we'll use two of the exact same substructs.  
+#They could be different though of course.
+
+binary_input = b'\xFF' + b'\x01\x02\x03\x04\x00\x05\x06\x07\x08\x09' * 2 + b'\xEE'
+
 
 expected_subdict = {'one': 1,
                     'two': 2,
@@ -62,9 +67,6 @@ expected_subdict = {'one': 1,
                                 'five': 5},
                      'six': 6,
                      'array':[7,8,9]}
-
-#for the example we'll use two of the exact same substructs.  They could be differen though of course.
-binary_input = b'\xFF' + b'\x01\x02\x03\x04\x00\x05\x06\x07\x08\x09' * 2 + b'\xEE'
 
 expected_dict = {'starting_FF': 0xFF,
                  'two_substructs':  [expected_subdict, expected_subdict],
